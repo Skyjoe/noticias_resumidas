@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, request
 from GoogleNews import GoogleNews
 from flask_caching import Cache
-import os
 
 app = Flask(__name__)
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
@@ -28,9 +27,9 @@ def fetch_news(query, start=0, count=3):
     
     return news_list
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
-    return "Bem-vindo ao serviço de notícias!"
+    return "Servidor Flask funcionando! Use a rota /news para buscar notícias."
 
 @app.route('/news', methods=['GET'])
 @cache.cached(timeout=300, query_string=True)
