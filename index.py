@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 from GoogleNews import GoogleNews
 from flask_caching import Cache
+import os
 
 app = Flask(__name__)
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
@@ -40,5 +41,7 @@ def get_news():
     news_batch = fetch_news(query, start=start, count=count)
     return jsonify(news_batch)
 
-# Exporte o app para Vercel
-app = app
+# Executar o servidor na porta definida pelo Render, se disponível
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
