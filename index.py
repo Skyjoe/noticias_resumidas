@@ -28,6 +28,10 @@ def fetch_news(query, start=0, count=3):
     
     return news_list
 
+@app.route('/', methods=['GET'])
+def home():
+    return "Bem-vindo ao serviço de notícias!"
+
 @app.route('/news', methods=['GET'])
 @cache.cached(timeout=300, query_string=True)
 def get_news():
@@ -41,7 +45,5 @@ def get_news():
     news_batch = fetch_news(query, start=start, count=count)
     return jsonify(news_batch)
 
-# Executar o servidor na porta definida pelo Render, se disponível
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host='0.0.0.0', port=port)
+    app.run(debug=True, host='0.0.0.0', port=5000)
