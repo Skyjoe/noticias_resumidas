@@ -1,14 +1,12 @@
 from flask import Flask, jsonify, request
 from GoogleNews import GoogleNews
 from flask_caching import Cache
-import asyncio
-import aiohttp
-from concurrent.futures import ThreadPoolExecutor
+import os
 
 app = Flask(__name__)
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 
-async def fetch_news_async(query, start=0, count=3):
+def fetch_news(query, start=0, count=3):
     googlenews = GoogleNews(lang='pt', region='BR')
     googlenews.search(query)
     results = googlenews.results()[start:start + count]
@@ -30,35 +28,18 @@ async def fetch_news_async(query, start=0, count=3):
     
     return news_list
 
-@app.route('/initial_news', methods=['GET'])
+@app.route('/news', methods=['GET'])
 @cache.cached(timeout=300, query_string=True)
-def get_initial_news():
+def get_news():
     query = request.args.get('query')
+    start = int(request.args.get('start', 2))
+    count = int(request.args.get('count', 10))
     
     if not query:
         return jsonify({"error": "Query not provided"}), 400
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    initial_news = loop.run_until_complete(fetch_news_async(query, start=0, count=3))
-    loop.close()
-
-    return jsonify(initial_news)
-
-@app.route('/remaining_news', methods=['GET'])
-@cache.cached(timeout=300, query_string=True)
-def get_remaining_news():
-    query = request.args.get('query')
-    
-    if not query:
-        return jsonify({"error": "Query not provided"}), 400
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    remaining_news = loop.run_until_complete(fetch_news_async(query, start=3, count=12))
-    loop.close()
-
-    return jsonify(remaining_news)
+    news_batch = fetch_news(query, start=start, count=count)
+    return jsonify(news_batch)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
