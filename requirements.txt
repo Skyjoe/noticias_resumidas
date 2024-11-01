@@ -1,3 +1,4 @@
 Flask
 GoogleNews
 Flask-Caching
+gunicorn
