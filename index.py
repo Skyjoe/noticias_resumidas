@@ -1,32 +1,29 @@
-from flask import Flask, jsonify, request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from GoogleNews import GoogleNews
-from flask_caching import Cache
-import os
-import threading
-from functools import wraps
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.memory import MemoryCacheBackend
+from fastapi_cache.decorator import cache
+import asyncio
 import time
+from typing import List, Dict, Optional
+import uvicorn
 
-app = Flask(__name__)
-
-cache = Cache(app, config={
-    'CACHE_TYPE': 'simple',
-    'CACHE_DEFAULT_TIMEOUT': 300,
-    'CACHE_THRESHOLD': 100
-})
+app = FastAPI()
 
 class NewsManager:
     def __init__(self):
         self.googlenews = GoogleNews(lang='pt', region='BR')
         self.last_request = {}
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
     
-    def get_news(self, query, start=0, count=3):
-        with self.lock:
+    async def get_news(self, query: str, start: int = 0, count: int = 3) -> List[Dict]:
+        async with self.lock:
             current_time = time.time()
             last_time = self.last_request.get(query, 0)
             
             if current_time - last_time < 2:
-                time.sleep(2)
+                await asyncio.sleep(2)
             
             try:
                 self.googlenews.search(query)
@@ -45,61 +42,83 @@ class NewsManager:
                         "date": item.get('date', 'Data não disponível')
                     })
                 
+                self.last_request[query] = current_time
                 return news_list
             finally:
                 self.googlenews.clear()
 
 news_manager = NewsManager()
 
-def rate_limit(f):
-    requests = {}
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        ip = request.remote_addr
+# Rate limiting
+class RateLimiter:
+    def __init__(self, requests_per_minute: int = 30):
+        self.requests_per_minute = requests_per_minute
+        self.requests = {}
+    
+    async def check(self, ip: str) -> bool:
         current_time = time.time()
         
-        requests[ip] = [t for t in requests.get(ip, []) if current_time - t < 60]
+        # Limpar requisições antigas
+        self.requests[ip] = [t for t in self.requests.get(ip, []) 
+                           if current_time - t < 60]
         
-        if len(requests.get(ip, [])) >= 30:
-            return jsonify({"error": "Too many requests. Please try again later."}), 429
+        if len(self.requests.get(ip, [])) >= self.requests_per_minute:
+            return False
         
-        requests.setdefault(ip, []).append(current_time)
-        return f(*args, **kwargs)
-    return decorated
+        self.requests.setdefault(ip, []).append(current_time)
+        return True
 
-@app.route('/news', methods=['GET'])
-@rate_limit
-def get_news():
-    query = request.args.get('query')
-    try:
-        start = int(request.args.get('start', 0))
-        count = int(request.args.get('count', 10))
-    except ValueError:
-        return jsonify({"error": "Invalid start or count parameters"}), 400
+rate_limiter = RateLimiter()
+
+@app.on_event("startup")
+async def startup():
+    FastAPICache.init(MemoryCacheBackend())
+
+@app.get("/news")
+@cache(expire=300)
+async def get_news(
+    request: Request,
+    query: str,
+    start: Optional[int] = 0,
+    count: Optional[int] = 10
+):
+    # Verificar rate limit
+    if not await rate_limiter.check(request.client.host):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please try again later."
+        )
     
     if not query:
-        return jsonify({"error": "Query not provided"}), 400
+        raise HTTPException(
+            status_code=400,
+            detail="Query not provided"
+        )
     
     count = min(count, 20)
     
-    cache_key = f"news:{query}:{start}:{count}"
-    cached_result = cache.get(cache_key)
-    if cached_result:
-        return jsonify(cached_result)
-    
     try:
-        news_batch = news_manager.get_news(query, start=start, count=count)
-        if news_batch:
-            cache.set(cache_key, news_batch)
-            return jsonify(news_batch)
-        return jsonify({"error": "No news found"}), 404
+        news_batch = await news_manager.get_news(query, start=start, count=count)
+        if not news_batch:
+            raise HTTPException(
+                status_code=404,
+                detail="No news found"
+            )
+        return news_batch
     except Exception as e:
-        return jsonify({"error": "Failed to fetch news. Please try again later."}), 500
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch news. Please try again later."
+        )
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "healthy"}), 200
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        workers=4
+    )
