@@ -35,8 +35,8 @@ def home():
 @cache.cached(timeout=300, query_string=True)
 def get_news():
     query = request.args.get('query')
-    start = int(request.args.get('start', 0))
-    count = int(request.args.get('count', 7))
+    start = int(request.args.get('start', 3))
+    count = int(request.args.get('count', 10))
     
     if not query:
         return jsonify({"error": "Query not provided"}), 400
